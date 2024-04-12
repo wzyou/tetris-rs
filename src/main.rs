@@ -128,6 +128,11 @@ impl Line {
     }
 
     fn draw<W: Write>(&self, w: &mut W, x: u16, y: u16) {
+        self.blocks.iter().enumerate().for_each(|(b_x, b)| {
+            b.draw(w, x + b_x as u16 * 2, y);
+        });
+    }
+    fn draw_<W: Write>(&self, w: &mut W, x: u16, y: u16) {
         for (b_x, b) in self.blocks.iter().enumerate() {
             b.draw(w, x + (b_x as u16) * 2, y)
         }
@@ -191,9 +196,10 @@ impl Board {
             (self.lines[0].blocks.len() * 2 + 2) as u16,
             (self.lines.len() + 2) as u16,
         );
-        for (y_l, l) in self.lines.iter().enumerate() {
-            l.draw(w, self.x, self.y + (y_l as u16))
-        }
+        self.lines
+            .iter()
+            .enumerate()
+            .for_each(|(y_l, l)| l.draw(w, self.x, self.y + (y_l as u16)));
     }
 
     fn add_block(&mut self, b: Block, x: u16, y: u16) {
@@ -205,14 +211,11 @@ impl Board {
     }
 
     fn erase(&mut self) -> usize {
-        let mut num = 0;
         let num_free: usize = self.lines.iter().filter(|l| l.is_all_free()).count();
         if num_free < 1 {
             return usize::max_value();
         }
         let mut num_erase: usize = 0;
-        //for y_ in num_free - 1..self.lines.len() {
-        //    let y = self.lines.len() - 1 - (y_ - (num_free - 1));
         let mut y = self.lines.len() - 1;
         while y > num_free {
             if self.lines[y].is_should_erase() {
@@ -322,6 +325,21 @@ impl Tetrimino {
     }
 
     fn blocks_not_free(&self) -> [(u16, u16); 4] {
+        let pv: Vec<(u16, u16)> = self
+            .blocks()
+            .iter()
+            .enumerate()
+            .filter(|(y, _)| (self.y + *y as i32) > 0)
+            .flat_map(|(y, l)| {
+                l.iter()
+                    .enumerate()
+                    .filter(|(_, b)| **b == 1)
+                    .map(|(x, _)| ((self.x + x as i32) as u16, (self.y + y as i32) as u16))
+            })
+            .collect();
+        pv.try_into().unwrap_or([(0, 0); 4])
+    }
+    fn blocks_not_free_(&self) -> [(u16, u16); 4] {
         let mut blocks: [(u16, u16); 4] = [(0, 0); 4];
         let mut index = 0;
         for (y, l) in self.blocks().iter().enumerate() {
@@ -376,8 +394,24 @@ impl Tetrimino {
     }
 
     fn blocks_rang_on_x(&self) -> (usize, usize) {
+        let xs: Vec<usize> = self
+            .blocks()
+            .iter()
+            .flat_map(|l| {
+                l.iter()
+                    .enumerate()
+                    .filter(|(_, b)| b == &&1)
+                    .map(|(x, _)| x)
+            })
+            .collect();
+        (
+            *xs.iter().min().unwrap_or(&4),
+            *xs.iter().max().unwrap_or(&0),
+        )
+    }
+    fn blocks_rang_on_x_(&self) -> (usize, usize) {
         let mut r: (usize, usize) = (4, 0);
-        for l in self.blocks() {
+        self.blocks().iter().for_each(|l| {
             for (i, b) in l.iter().enumerate() {
                 if *b == 1 {
                     if i < r.0 {
@@ -388,11 +422,24 @@ impl Tetrimino {
                     }
                 }
             }
-        }
+        });
         r
     }
 
     fn blocks_rang_on_y(&self) -> (usize, usize) {
+        let ys: Vec<usize> = self
+            .blocks()
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| l.contains(&1))
+            .map(|(y, _)| y)
+            .collect();
+        (
+            *ys.iter().min().unwrap_or(&4),
+            *ys.iter().max().unwrap_or(&0),
+        )
+    }
+    fn blocks_rang_on_y_(&self) -> (usize, usize) {
         let mut r: (usize, usize) = (4, 0);
         for (i, l) in self.blocks().iter().enumerate() {
             if l.contains(&1) {
@@ -454,6 +501,25 @@ impl Tetrimino {
     }
 
     fn draw<W: Write>(&self, w: &mut W) {
+        self.blocks().iter().enumerate().for_each(|(y, l)| {
+            l.iter()
+                .enumerate()
+                .filter(|(x, b)| **b as i32 == 1 && self.y + (y as i32) >= 0)
+                .for_each(|(x, b)| {
+                    write!(
+                        w,
+                        "{}{}  {}",
+                        cursor::Goto(
+                            (self.base_x as i32 + self.x * 2 + x as i32 * 2) as u16,
+                            (self.base_y as i32 + self.y + y as i32) as u16
+                        ),
+                        color::Bg(self.color()),
+                        style::Reset
+                    );
+                })
+        });
+    }
+    fn draw_<W: Write>(&self, w: &mut W) {
         let blocks = self.blocks();
 
         for (y_b, l) in blocks.iter().enumerate() {
