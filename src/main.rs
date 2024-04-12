@@ -4,6 +4,7 @@ use std::time::Duration;
 use termion::clear;
 use termion::color::Rgb;
 // use termion::color::Rgb;
+use rand::Rng;
 use std::io::Write;
 use std::thread;
 use termion::async_stdin;
@@ -29,8 +30,14 @@ fn main() {
         cursor::Goto(1, 1),
         cursor::Hide
     );
-    let mut tetrimino = Tetrimino::new(15, 3);
+    let mut tetrimino = Tetrimino::new(&board);
+    let mut finished = false;
     'main: loop {
+        if finished {
+            if let Some(Ok(Key::Char('q'))) = keys.next() {
+                continue;
+            }
+        }
         thread::sleep(Duration::from_millis(50));
         elapsed += Duration::from_millis(50);
         match keys.next() {
@@ -40,6 +47,7 @@ fn main() {
                 Key::Left => tetrimino.move_left(&board),
                 Key::Right => tetrimino.move_right(&board),
                 Key::Up => tetrimino.rotate(&board),
+                Key::Char(' ') => tetrimino.move_down_to_bottom(&board),
                 _ => {}
             },
             _ => {}
@@ -52,9 +60,13 @@ fn main() {
 
         if !tetrimino.is_can_down(&board) {
             for (x, y) in tetrimino.blocks_not_free().iter() {
-                board.add_block(Block::On(color::Rgb(255, 0, 0)), *x, *y);
+                board.add_block(Block::On(tetrimino.color()), *x, *y);
             }
-            tetrimino = Tetrimino::new(15, 3);
+            if usize::max_value() == board.erase() {
+                finished = true;
+                continue;
+            }
+            tetrimino = Tetrimino::new(&board);
         }
         board.draw(&mut out);
         tetrimino.draw(&mut out);
@@ -84,7 +96,7 @@ impl Block {
     }
 
     fn is_free(&self) -> bool {
-        match self {
+        match *self {
             Block::Free => true,
             _ => false,
         }
@@ -93,7 +105,7 @@ impl Block {
     fn draw<W: Write>(&self, w: &mut W, x: u16, y: u16) {
         let _ = match self {
             Block::Free => write!(w, "{}{}  ", cursor::Goto(x, y), style::Reset),
-            Block::On(_) => write!(w, "{}{}  ", cursor::Goto(x, y), color::Bg(color::Blue)),
+            Block::On(c) => write!(w, "{}{}  ", cursor::Goto(x, y), color::Bg(*c)),
         };
     }
 
@@ -193,16 +205,26 @@ impl Board {
     }
 
     fn erase(&mut self) -> usize {
-        for i_l in 0..self.lines.len() {
-            if self.lines[i_l].is_all_free() || self.lines[i_l].is_should_erase() {
-                if i_l < self.lines.len() - 1 {
-                    self.lines[i_l] = self.lines[i_l + 1];
-                } else {
-                    self.lines[i_l] = Line::new();
-                }
+        let mut num = 0;
+        let num_free: usize = self.lines.iter().filter(|l| l.is_all_free()).count();
+        if num_free < 1 {
+            return usize::max_value();
+        }
+        let mut num_erase: usize = 0;
+        //for y_ in num_free - 1..self.lines.len() {
+        //    let y = self.lines.len() - 1 - (y_ - (num_free - 1));
+        let mut y = self.lines.len() - 1;
+        while y > num_free {
+            if self.lines[y].is_should_erase() {
+                num_erase += 1;
+            } else {
+                y -= 1;
+            }
+            if num_erase > 0 {
+                self.lines[y] = self.lines[y - num_erase];
             }
         }
-        0
+        num_erase
     }
 }
 
@@ -267,21 +289,36 @@ struct Tetrimino {
     tty: Type,
     state: u8,
     x: i32,
-    y: u16,
+    y: i32,
     base_x: u16,
     base_y: u16,
 }
 
 impl Tetrimino {
-    fn new(base_x: u16, base_y: u16) -> Self {
-        Tetrimino {
-            tty: Type::I,
+    fn new(board: &Board) -> Self {
+        let mut rng = rand::thread_rng();
+        let n: u8 = rng.gen();
+        let pieces = [
+            Type::I,
+            Type::O,
+            Type::T,
+            Type::S,
+            Type::Z,
+            Type::J,
+            Type::L,
+        ];
+        let mut t = Tetrimino {
+            tty: pieces[(n % 7) as usize],
             state: 3,
             x: 10 / 2 - 2,
-            y: 0,
-            base_x,
-            base_y,
+            y: -4,
+            base_x: board.x,
+            base_y: board.y,
+        };
+        while t.y < 0 && t.is_can_down(board) {
+            t.move_down(board);
         }
+        t
     }
 
     fn blocks_not_free(&self) -> [(u16, u16); 4] {
@@ -289,8 +326,8 @@ impl Tetrimino {
         let mut index = 0;
         for (y, l) in self.blocks().iter().enumerate() {
             for (x, b) in l.iter().enumerate() {
-                if *b == 1 {
-                    blocks[index] = ((self.x + x as i32) as u16, self.y + y as u16);
+                if *b == 1 && (self.y + y as i32) >= 0 {
+                    blocks[index] = ((self.x + x as i32) as u16, (self.y + y as i32) as u16);
                     index = index + 1;
                 }
             }
@@ -392,7 +429,7 @@ impl Tetrimino {
 
     fn is_can_down(&mut self, board: &Board) -> bool {
         let (_, d) = self.blocks_rang_on_y();
-        if self.y + (d as u16) < 20 - 1 {
+        if self.y as i32 + (d as i32) < 20 - 1 {
             self.y += 1;
             let blocks = self.blocks_not_free();
             self.y -= 1;
@@ -404,6 +441,12 @@ impl Tetrimino {
         return false;
     }
 
+    fn move_down_to_bottom(&mut self, board: &Board) {
+        while self.is_can_down(board) {
+            self.y = self.y + 1;
+        }
+    }
+
     fn move_down(&mut self, board: &Board) {
         if self.is_can_down(board) {
             self.y = self.y + 1;
@@ -412,19 +455,18 @@ impl Tetrimino {
 
     fn draw<W: Write>(&self, w: &mut W) {
         let blocks = self.blocks();
-        let color = self.color();
 
         for (y_b, l) in blocks.iter().enumerate() {
             for (x_b, b) in l.iter().enumerate() {
-                if *b == 1 {
+                if *b == 1 && self.y + (y_b as i32) >= 0 {
                     write!(
                         w,
                         "{}{}  {}",
                         cursor::Goto(
                             (self.base_x as i32 + self.x * 2 + x_b as i32 * 2) as u16,
-                            (self.base_y + self.y + y_b as u16) as u16
+                            (self.base_y as i32 + self.y + y_b as i32) as u16
                         ),
-                        color::Bg(color::Red),
+                        color::Bg(self.color()),
                         style::Reset
                     );
                 }
