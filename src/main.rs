@@ -325,19 +325,22 @@ impl Tetrimino {
     }
 
     fn blocks_not_free(&self) -> [(u16, u16); 4] {
-        let pv: Vec<(u16, u16)> = self
-            .blocks()
+        let mut blocks: [(u16, u16); 4] = [(0, 0); 4];
+        let mut index = 0;
+        self.blocks()
             .iter()
             .enumerate()
             .filter(|(y, _)| (self.y + *y as i32) > 0)
-            .flat_map(|(y, l)| {
+            .for_each(|(y, l)| {
                 l.iter()
                     .enumerate()
                     .filter(|(_, b)| **b == 1)
-                    .map(|(x, _)| ((self.x + x as i32) as u16, (self.y + y as i32) as u16))
-            })
-            .collect();
-        pv.try_into().unwrap_or([(0, 0); 4])
+                    .for_each(|(x, _)| {
+                        blocks[index] =((self.x + x as i32) as u16, (self.y + y as i32) as u16);
+                        index += 1;
+                    });
+            });
+            blocks
     }
     fn blocks_not_free_(&self) -> [(u16, u16); 4] {
         let mut blocks: [(u16, u16); 4] = [(0, 0); 4];
