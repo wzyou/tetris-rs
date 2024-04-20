@@ -40,17 +40,16 @@ fn main() {
         }
         thread::sleep(Duration::from_millis(50));
         elapsed += Duration::from_millis(50);
-        match keys.next() {
-            Some(Ok(key)) => match key {
-                Key::Char('q') => break,
+        if let Some(Ok(key)) = keys.next() {
+            match key {
+                Key::Char('q') => break 'main,
                 Key::Down => tetrimino.move_down(&board),
                 Key::Left => tetrimino.move_left(&board),
                 Key::Right => tetrimino.move_right(&board),
                 Key::Up => tetrimino.rotate(&board),
                 Key::Char(' ') => tetrimino.move_down_to_bottom(&board),
                 _ => {}
-            },
-            _ => {}
+            }
         }
 
         if elapsed >= fall_rate {
@@ -96,10 +95,10 @@ impl Block {
     }
 
     fn is_free(&self) -> bool {
-        match *self {
-            Block::Free => true,
-            _ => false,
+        if let Block::Free = self {
+            return true;
         }
+        false
     }
 
     fn draw<W: Write>(&self, w: &mut W, x: u16, y: u16) {
@@ -132,28 +131,13 @@ impl Line {
             b.draw(w, x + b_x as u16 * 2, y);
         });
     }
-    fn draw_<W: Write>(&self, w: &mut W, x: u16, y: u16) {
-        for (b_x, b) in self.blocks.iter().enumerate() {
-            b.draw(w, x + (b_x as u16) * 2, y)
-        }
-    }
 
     fn is_should_erase(&self) -> bool {
-        for b in self.blocks {
-            if b.is_free() {
-                return false;
-            }
-        }
-        return true;
+        self.blocks.iter().all(|b| !b.is_free())
     }
 
     fn is_all_free(&self) -> bool {
-        for b in self.blocks {
-            if !b.is_free() {
-                return false;
-            }
-        }
-        return true;
+        self.blocks.iter().all(|b| b.is_free())
     }
 
     fn add(&mut self, b: Block, x: u16) {
@@ -181,17 +165,12 @@ impl Board {
     }
 
     fn is_conflict(&self, blocks: &[(u16, u16); 4]) -> bool {
-        for (x, y) in blocks.iter() {
-            if let Block::On(_) = self.lines[*y as usize].blocks[*x as usize] {
-                return true;
-            }
-        }
-        return false;
+        blocks.iter().any(|(x, y)| !self.is_free_on_xy(*x, *y))
     }
     fn draw<W: Write>(&self, w: &mut W) {
         draw_window(
             w,
-            self.x - 1 as u16,
+            self.x - 1,
             self.y - 1,
             (self.lines[0].blocks.len() * 2 + 2) as u16,
             (self.lines.len() + 2) as u16,
@@ -336,23 +315,10 @@ impl Tetrimino {
                     .enumerate()
                     .filter(|(_, b)| **b == 1)
                     .for_each(|(x, _)| {
-                        blocks[index] =((self.x + x as i32) as u16, (self.y + y as i32) as u16);
+                        blocks[index] = ((self.x + x as i32) as u16, (self.y + y as i32) as u16);
                         index += 1;
                     });
             });
-            blocks
-    }
-    fn blocks_not_free_(&self) -> [(u16, u16); 4] {
-        let mut blocks: [(u16, u16); 4] = [(0, 0); 4];
-        let mut index = 0;
-        for (y, l) in self.blocks().iter().enumerate() {
-            for (x, b) in l.iter().enumerate() {
-                if *b == 1 && (self.y + y as i32) >= 0 {
-                    blocks[index] = ((self.x + x as i32) as u16, (self.y + y as i32) as u16);
-                    index = index + 1;
-                }
-            }
-        }
         blocks
     }
 
@@ -397,64 +363,31 @@ impl Tetrimino {
     }
 
     fn blocks_rang_on_x(&self) -> (usize, usize) {
-        let xs: Vec<usize> = self
-            .blocks()
+        self.blocks()
             .iter()
-            .flat_map(|l| {
+            .enumerate()
+            .map(|(_, l)| {
                 l.iter()
                     .enumerate()
                     .filter(|(_, b)| b == &&1)
                     .map(|(x, _)| x)
+                    .collect::<Vec<usize>>()
             })
-            .collect();
-        (
-            *xs.iter().min().unwrap_or(&4),
-            *xs.iter().max().unwrap_or(&0),
-        )
-    }
-    fn blocks_rang_on_x_(&self) -> (usize, usize) {
-        let mut r: (usize, usize) = (4, 0);
-        self.blocks().iter().for_each(|l| {
-            for (i, b) in l.iter().enumerate() {
-                if *b == 1 {
-                    if i < r.0 {
-                        r.0 = i;
-                    }
-                    if i > r.1 {
-                        r.1 = i;
-                    }
-                }
-            }
-        });
-        r
+            .fold((4, 0), |(min, max), v| {
+                (
+                    *v.iter().min().unwrap_or(&min),
+                    *v.iter().max().unwrap_or(&max),
+                )
+            })
     }
 
     fn blocks_rang_on_y(&self) -> (usize, usize) {
-        let ys: Vec<usize> = self
-            .blocks()
+        self.blocks()
             .iter()
             .enumerate()
             .filter(|(_, l)| l.contains(&1))
             .map(|(y, _)| y)
-            .collect();
-        (
-            *ys.iter().min().unwrap_or(&4),
-            *ys.iter().max().unwrap_or(&0),
-        )
-    }
-    fn blocks_rang_on_y_(&self) -> (usize, usize) {
-        let mut r: (usize, usize) = (4, 0);
-        for (i, l) in self.blocks().iter().enumerate() {
-            if l.contains(&1) {
-                if i < r.0 {
-                    r.0 = i;
-                }
-                if i > r.1 {
-                    r.1 = i;
-                }
-            }
-        }
-        r
+            .fold((4, 0), |(min, max), v| (v.min(min), v.max(max)))
     }
 
     fn move_left(&mut self, board: &Board) {
@@ -479,7 +412,7 @@ impl Tetrimino {
 
     fn is_can_down(&mut self, board: &Board) -> bool {
         let (_, d) = self.blocks_rang_on_y();
-        if self.y as i32 + (d as i32) < 20 - 1 {
+        if self.y + (d as i32) < 20 - 1 {
             self.y += 1;
             let blocks = self.blocks_not_free();
             self.y -= 1;
@@ -488,18 +421,18 @@ impl Tetrimino {
             }
             return true;
         }
-        return false;
+        false
     }
 
     fn move_down_to_bottom(&mut self, board: &Board) {
         while self.is_can_down(board) {
-            self.y = self.y + 1;
+            self.y += 1;
         }
     }
 
     fn move_down(&mut self, board: &Board) {
         if self.is_can_down(board) {
-            self.y = self.y + 1;
+            self.y += 1;
         }
     }
 
@@ -507,8 +440,8 @@ impl Tetrimino {
         self.blocks().iter().enumerate().for_each(|(y, l)| {
             l.iter()
                 .enumerate()
-                .filter(|(x, b)| **b as i32 == 1 && self.y + (y as i32) >= 0)
-                .for_each(|(x, b)| {
+                .filter(|(_, b)| **b as i32 == 1 && self.y + (y as i32) >= 0)
+                .for_each(|(x, _)| {
                     write!(
                         w,
                         "{}{}  {}",
@@ -521,26 +454,6 @@ impl Tetrimino {
                     );
                 })
         });
-    }
-    fn draw_<W: Write>(&self, w: &mut W) {
-        let blocks = self.blocks();
-
-        for (y_b, l) in blocks.iter().enumerate() {
-            for (x_b, b) in l.iter().enumerate() {
-                if *b == 1 && self.y + (y_b as i32) >= 0 {
-                    write!(
-                        w,
-                        "{}{}  {}",
-                        cursor::Goto(
-                            (self.base_x as i32 + self.x * 2 + x_b as i32 * 2) as u16,
-                            (self.base_y as i32 + self.y + y_b as i32) as u16
-                        ),
-                        color::Bg(self.color()),
-                        style::Reset
-                    );
-                }
-            }
-        }
     }
 }
 
